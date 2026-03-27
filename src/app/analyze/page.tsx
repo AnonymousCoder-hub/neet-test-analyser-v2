@@ -6,20 +6,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ArrowLeft, Home, Calculator, Keyboard, MousePointer2 } from 'lucide-react'
+import { ArrowLeft, Home, Calculator, Keyboard, MousePointer2, ScanLine } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { Moon, Sun } from 'lucide-react'
+import { OMRScannerDialog } from '@/components/omr-scanner-dialog'
 
 export default function AnalyzePage() {
   const [testName, setTestName] = useState('')
   const [markedAnswers, setMarkedAnswers] = useState('')
   const [correctAnswers, setCorrectAnswers] = useState('')
-  const [inputMode, setInputMode] = useState<'manual' | 'omr'>('manual')
+  const [inputMode, setInputMode] = useState<'manual' | 'omr' | 'scanner'>('manual')
   const [showOldNumbering, setShowOldNumbering] = useState(false)
   const [omrMarkedAnswers, setOmrMarkedAnswers] = useState<string[]>(Array(180).fill('0'))
   const [analyzing, setAnalyzing] = useState(false)
+  const [omrScannerOpen, setOmrScannerOpen] = useState(false)
   const { theme, setTheme } = useTheme()
   const router = useRouter()
 
@@ -86,8 +88,14 @@ export default function AnalyzePage() {
     setOmrMarkedAnswers(newAnswers)
   }
 
+  // Handle answers from OMR scanner
+  const handleAnswersDetected = (answers: string[]) => {
+    setOmrMarkedAnswers(answers)
+    setInputMode('omr') // Switch to OMR mode to show the answers
+  }
+
   const analyzeTest = () => {
-    const marked = inputMode === 'omr' ? omrMarkedAnswers : parseAnswers(markedAnswers)
+    const marked = inputMode === 'omr' || inputMode === 'scanner' ? omrMarkedAnswers : parseAnswers(markedAnswers)
     const correct = parseAnswers(correctAnswers)
 
     if (marked.length !== 180 || correct.length !== 180) {
@@ -245,15 +253,20 @@ export default function AnalyzePage() {
                       Enter 180 digits representing your marked answers (0 = no option marked) and the correct answers.<br />
                       <span className="text-xs text-muted-foreground/80">First 45: Physics, Next 45: Chemistry, Next 45: Botany, Last 45: Zoology</span>
                     </>
-                  ) : (
+                  ) : inputMode === 'omr' ? (
                     <>
                       Select your answers for each question visually using the option buttons.<br />
                       <span className="text-xs text-muted-foreground/80">First 45: Physics, Next 45: Chemistry, Next 45: Botany, Last 45: Zoology</span>
                     </>
+                  ) : (
+                    <>
+                      Scan your OMR answer sheet to automatically detect your marked answers.<br />
+                      <span className="text-xs text-muted-foreground/80">After scanning, you can review and adjust the detected answers</span>
+                    </>
                   )}
                 </CardDescription>
               </div>
-              <Select value={inputMode} onValueChange={(v: 'manual' | 'omr') => setInputMode(v)}>
+              <Select value={inputMode} onValueChange={(v: 'manual' | 'omr' | 'scanner') => setInputMode(v)}>
                 <SelectTrigger className="w-[160px] h-10">
                   <SelectValue />
                 </SelectTrigger>
@@ -268,6 +281,12 @@ export default function AnalyzePage() {
                     <div className="flex items-center gap-2">
                       <MousePointer2 className="w-4 h-4" />
                       <span>Mode 2: OMR</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="scanner">
+                    <div className="flex items-center gap-2">
+                      <ScanLine className="w-4 h-4" />
+                      <span>Mode 3: Scan</span>
                     </div>
                   </SelectItem>
                 </SelectContent>
@@ -317,7 +336,7 @@ export default function AnalyzePage() {
                   </p>
                 </div>
               </>
-            ) : (
+            ) : inputMode === 'omr' ? (
               <>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -409,6 +428,121 @@ export default function AnalyzePage() {
                   </p>
                 </div>
               </>
+            ) : (
+              <>
+                {/* OMR Scanner Mode */}
+                <div className="py-8 text-center">
+                  <div className="mb-4">
+                    <ScanLine className="w-16 h-16 mx-auto text-primary mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">Scan Your OMR Sheet</h3>
+                    <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                      Upload an image of your OMR answer sheet and the scanner will automatically detect your marked answers.
+                      You can then review and adjust before submitting.
+                    </p>
+                  </div>
+                  <Button
+                    size="lg"
+                    className="px-8"
+                    onClick={() => setOmrScannerOpen(true)}
+                  >
+                    <ScanLine className="w-5 h-5 mr-2" />
+                    Open OMR Scanner
+                  </Button>
+                </div>
+
+                {/* Show current detected answers if any */}
+                {omrMarkedAnswers.some(a => a !== '0') && (
+                  <div className="border rounded-lg p-4 bg-muted/30">
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="text-sm font-medium">Detected Answers</label>
+                      <span className="text-xs text-muted-foreground">
+                        {omrMarkedAnswers.filter(a => a !== '0').length} / 180 answered
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs text-muted-foreground cursor-pointer" htmlFor="old-numbering-scan">
+                          Old OMR Numbering
+                        </label>
+                        <input
+                          type="checkbox"
+                          id="old-numbering-scan"
+                          checked={showOldNumbering}
+                          onChange={(e) => setShowOldNumbering(e.target.checked)}
+                          className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setOmrScannerOpen(true)}
+                      >
+                        <ScanLine className="w-3 h-3 mr-1" />
+                        Re-scan
+                      </Button>
+                    </div>
+
+                    {/* Physics Section */}
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-blue-500" />
+                        <h3 className="text-xs font-semibold">Physics</h3>
+                      </div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {Array.from({ length: 45 }, (_, i) => i).map(renderOMRRow)}
+                      </div>
+                    </div>
+
+                    {/* Chemistry Section */}
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-green-500" />
+                        <h3 className="text-xs font-semibold">Chemistry</h3>
+                      </div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {Array.from({ length: 45 }, (_, i) => i + 45).map(renderOMRRow)}
+                      </div>
+                    </div>
+
+                    {/* Botany Section */}
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <h3 className="text-xs font-semibold">Botany</h3>
+                      </div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {Array.from({ length: 45 }, (_, i) => i + 90).map(renderOMRRow)}
+                      </div>
+                    </div>
+
+                    {/* Zoology Section */}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-purple-500" />
+                        <h3 className="text-xs font-semibold">Zoology</h3>
+                      </div>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {Array.from({ length: 45 }, (_, i) => i + 135).map(renderOMRRow)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Correct Answers (180 digits)</label>
+                  <Textarea
+                    placeholder="e.g., 1131423132431413141331312132131213131213..."
+                    value={correctAnswers}
+                    onChange={(e) => setCorrectAnswers(e.target.value.replace(/[^1-4]/g, ''))}
+                    className="font-mono text-sm"
+                    rows={4}
+                    maxLength={180}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {correctAnswers.length}/180 digits entered
+                  </p>
+                </div>
+              </>
             )}
 
             <Button
@@ -443,6 +577,13 @@ export default function AnalyzePage() {
           </CardContent>
         </Card>
       </main>
+
+      {/* OMR Scanner Dialog */}
+      <OMRScannerDialog
+        open={omrScannerOpen}
+        onOpenChange={setOmrScannerOpen}
+        onAnswersDetected={handleAnswersDetected}
+      />
 
       {/* Theme Toggle Button */}
       <Button
