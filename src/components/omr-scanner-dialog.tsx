@@ -4,8 +4,6 @@ import { useState, useRef, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Badge } from '@/components/ui/badge'
 import { Upload, Play, RotateCcw, Loader2, CheckCircle2, AlertCircle, Save, FolderOpen, Download, Trash2 } from 'lucide-react'
 
 const NUM_COLS = 4
@@ -290,16 +288,12 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     setResult(null)
   }
 
-  const closeDialog = () => {
-    onOpenChange(false)
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[90vh] p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-4 border-b bg-background">
+      <DialogContent className="max-w-6xl h-[95vh] p-0 gap-0 overflow-hidden flex flex-col">
+        <DialogHeader className="p-3 border-b bg-background flex-shrink-0">
           <div className="flex items-center justify-between">
-            <DialogTitle className="text-lg font-bold">OMR Scanner - Scan Your Answer Sheet</DialogTitle>
+            <DialogTitle className="text-lg font-bold">OMR Scanner</DialogTitle>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setShowPresetPanel(!showPresetPanel)}>
                 <FolderOpen className="w-4 h-4 mr-1"/>Presets
@@ -313,22 +307,22 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
           </div>
         </DialogHeader>
 
-        <div className="flex-1 flex flex-col lg:flex-row h-[calc(90vh-70px)]">
-          {/* Image with overlay */}
-          <div className="flex-1 p-2 lg:p-4 overflow-auto flex justify-center bg-muted/30">
+        <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
+          {/* Image with overlay - scrollable */}
+          <div className="flex-1 p-3 overflow-auto flex justify-center bg-muted/30 min-h-0">
             {!image ? (
               <div
-                className="w-full max-w-sm p-10 border-2 border-dashed rounded-xl bg-background text-center cursor-pointer hover:border-primary transition-colors h-full flex flex-col items-center justify-center"
+                className="w-full max-w-sm p-10 border-2 border-dashed rounded-xl bg-background text-center cursor-pointer hover:border-primary transition-colors flex flex-col items-center justify-center my-auto"
                 onClick={() => fileRef.current?.click()}
               >
                 <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => e.target.files?.[0] && loadFile(e.target.files[0])} />
                 <Upload className="w-14 h-14 text-primary mx-auto mb-4" />
                 <h3 className="text-lg font-semibold">Upload OMR Sheet</h3>
-                <p className="text-sm text-muted-foreground mt-2">Click or drag to upload</p>
+                <p className="text-sm text-muted-foreground mt-2">Click to upload</p>
               </div>
             ) : (
-              <div className="relative inline-block">
-                <img ref={imgRef} src={image} alt="OMR" className="max-w-full max-h-[60vh]" draggable={false} />
+              <div className="relative inline-block my-4">
+                <img ref={imgRef} src={image} alt="OMR" className="max-w-full h-auto" draggable={false} />
 
                 {imgSize && (
                   <div
@@ -368,168 +362,177 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
             )}
           </div>
 
-          {/* Controls */}
-          <div className="w-full lg:w-80 bg-background border-t lg:border-l p-3 overflow-y-auto">
-            <div className="space-y-3">
-              {/* Preset Panel */}
-              {showPresetPanel && (
-                <div className="border rounded-lg p-2 bg-muted/50">
-                  <h3 className="text-xs font-semibold mb-2">Save/Load Presets</h3>
+          {/* Controls - scrollable with sticky button */}
+          <div className="w-full lg:w-80 bg-background border-t lg:border-l flex flex-col min-h-0 max-h-[50vh] lg:max-h-none">
+            <div className="flex-1 overflow-y-auto p-3">
+              <div className="space-y-3">
+                {/* Preset Panel */}
+                {showPresetPanel && (
+                  <div className="border rounded-lg p-2 bg-muted/50">
+                    <h3 className="text-xs font-semibold mb-2">Save/Load Presets</h3>
 
-                  <div className="flex gap-2 mb-2">
-                    <input
-                      type="text"
-                      placeholder="Preset name..."
-                      value={presetName}
-                      onChange={e => setPresetName(e.target.value)}
-                      className="flex-1 border rounded px-2 py-1 text-xs"
-                    />
-                    <Button size="sm" onClick={savePreset} className="h-7">
-                      <Save className="w-3 h-3"/>
-                    </Button>
+                    <div className="flex gap-2 mb-2">
+                      <input
+                        type="text"
+                        placeholder="Preset name..."
+                        value={presetName}
+                        onChange={e => setPresetName(e.target.value)}
+                        className="flex-1 border rounded px-2 py-1 text-xs"
+                      />
+                      <Button size="sm" onClick={savePreset} className="h-7">
+                        <Save className="w-3 h-3"/>
+                      </Button>
+                    </div>
+
+                    <div className="flex gap-2 mb-2">
+                      <Button size="sm" variant="outline" onClick={exportCurrentSettings} className="flex-1 h-7 text-xs">
+                        <Download className="w-3 h-3 mr-1"/>Export
+                      </Button>
+                      <input ref={presetImportRef} type="file" accept=".json" className="hidden" onChange={importAndApply} />
+                      <Button size="sm" variant="outline" onClick={() => presetImportRef.current?.click()} className="flex-1 h-7 text-xs">
+                        <Upload className="w-3 h-3 mr-1"/>Import
+                      </Button>
+                    </div>
+
+                    {presets.length > 0 && (
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {presets.map((preset, i) => (
+                          <div key={i} className="flex items-center gap-1 bg-background rounded p-1.5 text-xs">
+                            <button
+                              onClick={() => loadPreset(preset)}
+                              className="flex-1 text-left hover:text-primary truncate"
+                            >
+                              {preset.name}
+                            </button>
+                            <button onClick={() => exportPreset(preset)} className="p-1 hover:bg-muted rounded" title="Export">
+                              <Download className="w-3 h-3 text-muted-foreground"/>
+                            </button>
+                            <button onClick={() => deletePreset(i)} className="p-1 hover:bg-destructive/10 rounded" title="Delete">
+                              <Trash2 className="w-3 h-3 text-destructive"/>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                )}
 
-                  <div className="flex gap-2 mb-2">
-                    <Button size="sm" variant="outline" onClick={exportCurrentSettings} className="flex-1 h-7 text-xs">
-                      <Download className="w-3 h-3 mr-1"/>Export
-                    </Button>
-                    <input ref={presetImportRef} type="file" accept=".json" className="hidden" onChange={importAndApply} />
-                    <Button size="sm" variant="outline" onClick={() => presetImportRef.current?.click()} className="flex-1 h-7 text-xs">
-                      <Upload className="w-3 h-3 mr-1"/>Import
-                    </Button>
-                  </div>
-
-                  {presets.length > 0 && (
-                    <div className="space-y-1 max-h-32 overflow-y-auto">
-                      {presets.map((preset, i) => (
-                        <div key={i} className="flex items-center gap-1 bg-background rounded p-1.5 text-xs">
-                          <button
-                            onClick={() => loadPreset(preset)}
-                            className="flex-1 text-left hover:text-primary truncate"
-                          >
-                            {preset.name}
-                          </button>
-                          <button onClick={() => exportPreset(preset)} className="p-1 hover:bg-muted rounded" title="Export">
-                            <Download className="w-3 h-3 text-muted-foreground"/>
-                          </button>
-                          <button onClick={() => deletePreset(i)} className="p-1 hover:bg-destructive/10 rounded" title="Delete">
-                            <Trash2 className="w-3 h-3 text-destructive"/>
-                          </button>
+                {image && imgSize && (
+                  <>
+                    {/* Rectangle Position */}
+                    <div className="bg-muted/50 rounded-lg p-2">
+                      <h3 className="text-xs font-semibold mb-1.5">Selection Rectangle</h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">X <span className="font-mono">{rectX}</span></label>
+                          <Slider value={[rectX]} onValueChange={([v]) => setRectX(v)} min={0} max={imgSize.w} step={1} className="mt-1 h-4" />
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {image && imgSize && (
-                <>
-                  {/* Rectangle Position */}
-                  <div className="bg-muted/50 rounded-lg p-2">
-                    <h3 className="text-xs font-semibold mb-1.5">Selection Rectangle</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">X <span className="font-mono">{rectX}</span></label>
-                        <Slider value={[rectX]} onValueChange={([v]) => setRectX(v)} min={0} max={imgSize.w} step={1} className="mt-1 h-4" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">Y <span className="font-mono">{rectY}</span></label>
-                        <Slider value={[rectY]} onValueChange={([v]) => setRectY(v)} min={0} max={imgSize.h} step={1} className="mt-1 h-4" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">W <span className="font-mono">{rectW}</span></label>
-                        <Slider value={[rectW]} onValueChange={([v]) => setRectW(v)} min={50} max={imgSize.w} step={1} className="mt-1 h-4" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">H <span className="font-mono">{rectH}</span></label>
-                        <Slider value={[rectH]} onValueChange={([v]) => setRectH(v)} min={50} max={imgSize.h} step={1} className="mt-1 h-4" />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Column Positions */}
-                  <div className="bg-muted/50 rounded-lg p-2">
-                    <h3 className="text-xs font-semibold mb-1.5">Column Positions</h3>
-                    <div className="space-y-1">
-                      {[ [col1, setCol1, 1], [col2, setCol2, 2], [col3, setCol3, 3], [col4, setCol4, 4] ].map(([val, set, num]) => (
-                        <div key={num} className="flex items-center gap-2">
-                          <span className="w-6 text-[10px] text-muted-foreground">C{num}</span>
-                          <Slider value={[val as number]} onValueChange={([v]) => (set as React.Dispatch<React.SetStateAction<number>>)(v)} min={0} max={rectW} step={1} className="flex-1 h-4" />
-                          <span className="w-5 text-[10px] font-mono text-right">{val}</span>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">Y <span className="font-mono">{rectY}</span></label>
+                          <Slider value={[rectY]} onValueChange={([v]) => setRectY(v)} min={0} max={imgSize.h} step={1} className="mt-1 h-4" />
                         </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Row Calibration */}
-                  <div className="bg-muted/50 rounded-lg p-2">
-                    <h3 className="text-xs font-semibold mb-1.5">Row Calibration</h3>
-                    <div className="space-y-1">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">Start Y (green) <span className="font-mono text-green-600">{startY}</span></label>
-                        <Slider value={[startY]} onValueChange={([v]) => setStartY(v)} min={0} max={rectH} step={1} className="mt-1 h-4" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">End Y (red) <span className="font-mono text-red-600">{endY}</span></label>
-                        <Slider value={[endY]} onValueChange={([v]) => setEndY(v)} min={0} max={rectH} step={1} className="mt-1 h-4" />
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">W <span className="font-mono">{rectW}</span></label>
+                          <Slider value={[rectW]} onValueChange={([v]) => setRectW(v)} min={50} max={imgSize.w} step={1} className="mt-1 h-4" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">H <span className="font-mono">{rectH}</span></label>
+                          <Slider value={[rectH]} onValueChange={([v]) => setRectH(v)} min={50} max={imgSize.h} step={1} className="mt-1 h-4" />
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Bubble Settings */}
-                  <div className="bg-muted/50 rounded-lg p-2">
-                    <h3 className="text-xs font-semibold mb-1.5">Bubble Settings</h3>
-                    <div className="space-y-1">
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">Option Gap <span className="font-mono">{optGap}</span></label>
-                        <Slider value={[optGap]} onValueChange={([v]) => setOptGap(v)} min={5} max={50} step={1} className="mt-1 h-4" />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-muted-foreground flex justify-between">Bubble Radius <span className="font-mono">{bubbleR}</span></label>
-                        <Slider value={[bubbleR]} onValueChange={([v]) => setBubbleR(v)} min={3} max={25} step={1} className="mt-1 h-4" />
+                    {/* Column Positions */}
+                    <div className="bg-muted/50 rounded-lg p-2">
+                      <h3 className="text-xs font-semibold mb-1.5">Column Positions</h3>
+                      <div className="space-y-1">
+                        {[ [col1, setCol1, 1], [col2, setCol2, 2], [col3, setCol3, 3], [col4, setCol4, 4] ].map(([val, set, num]) => (
+                          <div key={num} className="flex items-center gap-2">
+                            <span className="w-6 text-[10px] text-muted-foreground">C{num}</span>
+                            <Slider value={[val as number]} onValueChange={([v]) => (set as React.Dispatch<React.SetStateAction<number>>)(v)} min={0} max={rectW} step={1} className="flex-1 h-4" />
+                            <span className="w-5 text-[10px] font-mono text-right">{val}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </div>
 
+                    {/* Row Calibration */}
+                    <div className="bg-muted/50 rounded-lg p-2">
+                      <h3 className="text-xs font-semibold mb-1.5">Row Calibration</h3>
+                      <div className="space-y-1">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">Start Y (green) <span className="font-mono text-green-600">{startY}</span></label>
+                          <Slider value={[startY]} onValueChange={([v]) => setStartY(v)} min={0} max={rectH} step={1} className="mt-1 h-4" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">End Y (red) <span className="font-mono text-red-600">{endY}</span></label>
+                          <Slider value={[endY]} onValueChange={([v]) => setEndY(v)} min={0} max={rectH} step={1} className="mt-1 h-4" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bubble Settings */}
+                    <div className="bg-muted/50 rounded-lg p-2">
+                      <h3 className="text-xs font-semibold mb-1.5">Bubble Settings</h3>
+                      <div className="space-y-1">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">Option Gap <span className="font-mono">{optGap}</span></label>
+                          <Slider value={[optGap]} onValueChange={([v]) => setOptGap(v)} min={5} max={50} step={1} className="mt-1 h-4" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">Bubble Radius <span className="font-mono">{bubbleR}</span></label>
+                          <Slider value={[bubbleR]} onValueChange={([v]) => setBubbleR(v)} min={3} max={25} step={1} className="mt-1 h-4" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {result && !result.success && (
+                      <div className="border border-destructive/30 bg-destructive/10 rounded-lg p-2 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-destructive"/>
+                        <span className="text-destructive text-xs">{result.error}</span>
+                      </div>
+                    )}
+
+                    {result?.success && (
+                      <>
+                        <div className="border border-green-500/30 bg-green-500/10 rounded-lg p-2">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-green-600"/>
+                            <span className="font-semibold text-xs">Detected: {result.data.statistics.answered} answers</span>
+                          </div>
+                          <div className="grid grid-cols-4 gap-1 text-center text-[10px]">
+                            <div className="bg-green-500/20 rounded p-1"><p className="font-bold text-green-700">{result.data.statistics.answered}</p><p>Answered</p></div>
+                            <div className="bg-amber-500/20 rounded p-1"><p className="font-bold text-amber-700">{result.data.statistics.unanswered}</p><p>Empty</p></div>
+                            <div className="bg-red-500/20 rounded p-1"><p className="font-bold text-red-700">{result.data.statistics.invalid}</p><p>Invalid</p></div>
+                            <div className="bg-muted rounded p-1"><p className="font-bold">{result.data.statistics.total_questions}</p><p>Total</p></div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg overflow-hidden border">
+                          <p className="text-[10px] text-muted-foreground p-1 bg-muted">Gray = positions | Green = detected | Red = invalid</p>
+                          <img src={result.annotatedImage} alt="Result" className="w-full max-h-40 object-contain"/>
+                        </div>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Sticky Bottom Buttons */}
+            {image && imgSize && (
+              <div className="border-t p-3 bg-background flex-shrink-0">
+                {!result?.success ? (
                   <Button size="lg" className="w-full font-bold" onClick={scan} disabled={processing}>
                     {processing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin"/>Scanning...</> : <><Play className="w-4 h-4 mr-2"/>SCAN</>}
                   </Button>
-
-                  {result && !result.success && (
-                    <div className="border border-destructive/30 bg-destructive/10 rounded-lg p-2 flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-destructive"/>
-                      <span className="text-destructive text-xs">{result.error}</span>
-                    </div>
-                  )}
-
-                  {result?.success && (
-                    <>
-                      <div className="border border-green-500/30 bg-green-500/10 rounded-lg p-2">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-green-600"/>
-                          <span className="font-semibold text-xs">Detected: {result.data.statistics.answered} answers</span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-1 text-center text-[10px]">
-                          <div className="bg-green-500/20 rounded p-1"><p className="font-bold text-green-700">{result.data.statistics.answered}</p><p>Answered</p></div>
-                          <div className="bg-amber-500/20 rounded p-1"><p className="font-bold text-amber-700">{result.data.statistics.unanswered}</p><p>Empty</p></div>
-                          <div className="bg-red-500/20 rounded p-1"><p className="font-bold text-red-700">{result.data.statistics.invalid}</p><p>Invalid</p></div>
-                          <div className="bg-muted rounded p-1"><p className="font-bold">{result.data.statistics.total_questions}</p><p>Total</p></div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-lg overflow-hidden border">
-                        <p className="text-[10px] text-muted-foreground p-1 bg-muted">Gray = positions | Green = detected | Red = invalid</p>
-                        <img src={result.annotatedImage} alt="Result" className="w-full max-h-40 object-contain"/>
-                      </div>
-
-                      <Button size="lg" className="w-full font-bold bg-green-600 hover:bg-green-700" onClick={confirmAndImport}>
-                        <CheckCircle2 className="w-4 h-4 mr-2"/>Confirm & Import Answers
-                      </Button>
-                    </>
-                  )}
-                </>
-              )}
-            </div>
+                ) : (
+                  <Button size="lg" className="w-full font-bold bg-green-600 hover:bg-green-700" onClick={confirmAndImport}>
+                    <CheckCircle2 className="w-4 h-4 mr-2"/>Confirm & Import Answers
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </DialogContent>
