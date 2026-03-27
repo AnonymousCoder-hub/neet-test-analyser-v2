@@ -293,7 +293,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
       <DialogContent className="max-w-6xl h-[95vh] p-0 gap-0 overflow-hidden flex flex-col">
         <DialogHeader className="p-3 border-b bg-background flex-shrink-0">
           <div className="flex items-center justify-between">
-            <DialogTitle className="text-lg font-bold">OMR Scanner</DialogTitle>
+            <DialogTitle className="text-lg font-bold">OMR Scanner (180Q)</DialogTitle>
             <div className="flex gap-2">
               <Button size="sm" variant="outline" onClick={() => setShowPresetPanel(!showPresetPanel)}>
                 <FolderOpen className="w-4 h-4 mr-1"/>Presets
