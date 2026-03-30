@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
-import { Upload, Play, RotateCcw, Loader2, CheckCircle2, AlertCircle, Save, FolderOpen, Download, Trash2 } from 'lucide-react'
+import { Upload, Play, RotateCcw, Loader2, CheckCircle2, AlertCircle, Save, FolderOpen, Download, Trash2, AlignVerticalSpaceAround } from 'lucide-react'
 
 const NUM_COLS = 4
 const QUESTIONS_PER_COL = 45
@@ -26,6 +26,11 @@ interface Preset {
     startY: number
     endY: number
     bubbleR: number
+    globalYOffset: number
+    col1Y: number
+    col2Y: number
+    col3Y: number
+    col4Y: number
   }
 }
 
@@ -60,6 +65,15 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
   const [endY, setEndY] = useState(700)
   const [bubbleR, setBubbleR] = useState(8)
 
+  // Per-column Y offsets (individual column vertical adjustment)
+  const [col1Y, setCol1Y] = useState(0)
+  const [col2Y, setCol2Y] = useState(0)
+  const [col3Y, setCol3Y] = useState(0)
+  const [col4Y, setCol4Y] = useState(0)
+
+  // Global Y offset (shifts ALL columns together)
+  const [globalYOffset, setGlobalYOffset] = useState(0)
+
   // Presets
   const [presets, setPresets] = useState<Preset[]>([])
   const [presetName, setPresetName] = useState('')
@@ -71,6 +85,10 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
   const [displayWidth, setDisplayWidth] = useState(300)
 
   const cols = [col1, col2, col3, col4]
+  const colYs = [col1Y, col2Y, col3Y, col4Y]
+
+  // Effective Y offset per column = global + individual
+  const getEffectiveOffset = (ci: number) => globalYOffset + colYs[ci]
 
   // Load presets from localStorage on mount
   useEffect(() => {
@@ -121,6 +139,13 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
         setStartY(Math.round(h * 0.01))
         setEndY(Math.round(h * 0.52))
         setBubbleR(Math.round(Math.min(w, h) * 0.006))
+
+        // Reset Y offsets
+        setGlobalYOffset(0)
+        setCol1Y(0)
+        setCol2Y(0)
+        setCol3Y(0)
+        setCol4Y(0)
       }
       img.src = e.target!.result as string
       setImage(e.target!.result as string)
@@ -138,7 +163,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
 
   const getBubblePos = (ci: number, ri: number, oi: number) => {
     const absX = rectX + cols[ci] + oi * optGap
-    const absY = rectY + getRowY(ri)
+    const baseY = rectY + getRowY(ri)
+    const absY = baseY + getEffectiveOffset(ci)
     return { absX, absY }
   }
 
@@ -155,7 +181,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
       settings: {
         rectX, rectY, rectW, rectH,
         col1, col2, col3, col4,
-        optGap, startY, endY, bubbleR
+        optGap, startY, endY, bubbleR,
+        globalYOffset, col1Y, col2Y, col3Y, col4Y
       }
     }
 
@@ -179,6 +206,11 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     setStartY(s.startY)
     setEndY(s.endY)
     setBubbleR(s.bubbleR)
+    setGlobalYOffset(s.globalYOffset ?? 0)
+    setCol1Y(s.col1Y ?? 0)
+    setCol2Y(s.col2Y ?? 0)
+    setCol3Y(s.col3Y ?? 0)
+    setCol4Y(s.col4Y ?? 0)
     setShowPresetPanel(false)
   }
 
@@ -232,10 +264,20 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
       settings: {
         rectX, rectY, rectW, rectH,
         col1, col2, col3, col4,
-        optGap, startY, endY, bubbleR
+        optGap, startY, endY, bubbleR,
+        globalYOffset, col1Y, col2Y, col3Y, col4Y
       }
     }
     exportPreset(preset)
+  }
+
+  // Reset all column Y offsets to 0
+  const resetColumnOffsets = () => {
+    setGlobalYOffset(0)
+    setCol1Y(0)
+    setCol2Y(0)
+    setCol3Y(0)
+    setCol4Y(0)
   }
 
   const scan = async () => {
@@ -249,7 +291,13 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
       optGap: optGap,
       startY: startY,
       endY: endY,
-      bubbleR: bubbleR
+      bubbleR: bubbleR,
+      colYOffsets: [
+        getEffectiveOffset(0),
+        getEffectiveOffset(1),
+        getEffectiveOffset(2),
+        getEffectiveOffset(3)
+      ]
     }
 
     try {
@@ -338,10 +386,17 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                       Array.from({ length: QUESTIONS_PER_COL }, (_, ri) =>
                         Array.from({ length: OPTIONS }, (_, oi) => {
                           const { absX, absY } = getBubblePos(ci, ri, oi)
+                          // Use column-specific tint colors for easier identification
+                          const colColors = [
+                            'border-sky-400/70 bg-sky-400/25',
+                            'border-amber-400/70 bg-amber-400/25',
+                            'border-emerald-400/70 bg-emerald-400/25',
+                            'border-rose-400/70 bg-rose-400/25',
+                          ]
                           return (
                             <div
                               key={`${ci}-${ri}-${oi}`}
-                              className="absolute rounded-full border border-blue-500/70 bg-blue-400/30"
+                              className={`absolute rounded-full border ${colColors[ci]}`}
                               style={{
                                 left: (absX - rectX) * scale,
                                 top: (absY - rectY) * scale,
@@ -442,15 +497,55 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                       </div>
                     </div>
 
-                    {/* Column Positions */}
+                    {/* Column X Positions */}
                     <div className="bg-muted/50 rounded-lg p-2">
-                      <h3 className="text-xs font-semibold mb-1.5">Column Positions</h3>
+                      <h3 className="text-xs font-semibold mb-1.5">Column X Positions</h3>
                       <div className="space-y-1">
                         {[ [col1, setCol1, 1], [col2, setCol2, 2], [col3, setCol3, 3], [col4, setCol4, 4] ].map(([val, set, num]) => (
                           <div key={num} className="flex items-center gap-2">
                             <span className="w-6 text-[10px] text-muted-foreground">C{num}</span>
                             <Slider value={[val as number]} onValueChange={([v]) => (set as React.Dispatch<React.SetStateAction<number>>)(v)} min={0} max={rectW} step={1} className="flex-1 h-4" />
                             <span className="w-5 text-[10px] font-mono text-right">{val}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Column Y Offsets */}
+                    <div className="bg-muted/50 rounded-lg p-2">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <h3 className="text-xs font-semibold flex items-center gap-1">
+                          <AlignVerticalSpaceAround className="w-3 h-3"/>
+                          Column Y Offsets
+                        </h3>
+                        <button
+                          onClick={resetColumnOffsets}
+                          className="text-[9px] text-muted-foreground hover:text-destructive underline"
+                        >
+                          Reset All
+                        </button>
+                      </div>
+                      <p className="text-[9px] text-muted-foreground mb-2">Fix crooked columns — shifts each column vertically</p>
+                      {/* Global Y Offset */}
+                      <div className="mb-2 pb-2 border-b border-muted">
+                        <label className="text-[10px] text-muted-foreground flex justify-between">
+                          <span className="font-medium text-foreground/70">Global Y Shift</span>
+                          <span className="font-mono">{globalYOffset > 0 ? '+' : ''}{globalYOffset}</span>
+                        </label>
+                        <Slider value={[globalYOffset]} onValueChange={([v]) => setGlobalYOffset(v)} min={-100} max={100} step={1} className="mt-1 h-4" />
+                      </div>
+                      {/* Per-column offsets */}
+                      <div className="space-y-1">
+                        {[
+                          [col1Y, setCol1Y, 1, 'text-sky-500'],
+                          [col2Y, setCol2Y, 2, 'text-amber-500'],
+                          [col3Y, setCol3Y, 3, 'text-emerald-500'],
+                          [col4Y, setCol4Y, 4, 'text-rose-500'],
+                        ].map(([val, set, num, colorClass]) => (
+                          <div key={num} className="flex items-center gap-2">
+                            <span className={`w-6 text-[10px] font-medium ${colorClass}`}>C{num}</span>
+                            <Slider value={[val as number]} onValueChange={([v]) => (set as React.Dispatch<React.SetStateAction<number>>)(v)} min={-100} max={100} step={1} className="flex-1 h-4" />
+                            <span className={`w-8 text-[10px] font-mono text-right ${colorClass}`}>{(val as number) > 0 ? '+' : ''}{val}</span>
                           </div>
                         ))}
                       </div>
@@ -527,9 +622,14 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                     {processing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin"/>Scanning...</> : <><Play className="w-4 h-4 mr-2"/>SCAN</>}
                   </Button>
                 ) : (
-                  <Button size="lg" className="w-full font-bold bg-green-600 hover:bg-green-700" onClick={confirmAndImport}>
-                    <CheckCircle2 className="w-4 h-4 mr-2"/>Confirm & Import Answers
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button size="lg" variant="outline" className="font-bold" onClick={() => setResult(null)}>
+                      <RotateCcw className="w-4 h-4 mr-2"/>Re-scan
+                    </Button>
+                    <Button size="lg" className="flex-1 font-bold bg-green-600 hover:bg-green-700" onClick={confirmAndImport}>
+                      <CheckCircle2 className="w-4 h-4 mr-2"/>Confirm & Import
+                    </Button>
+                  </div>
                 )}
               </div>
             )}

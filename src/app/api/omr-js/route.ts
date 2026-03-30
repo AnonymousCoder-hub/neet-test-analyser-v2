@@ -8,6 +8,7 @@ interface Settings {
   startY: number;
   endY: number;
   bubbleR: number;
+  colYOffsets?: number[]; // per-column Y offset adjustments
 }
 
 // Get darkness ratio of a circular region (0=white, 1=black)
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest) {
     }
 
     const settings: Settings = JSON.parse(settingsStr);
-    const { rect, cols, optGap, startY, endY, bubbleR } = settings;
+    const { rect, cols, optGap, startY, endY, bubbleR, colYOffsets } = settings;
+    const colOffsets = colYOffsets || cols.map(() => 0); // default to 0 if not provided
 
     // Load image
     const arrayBuffer = await file.arrayBuffer();
@@ -99,10 +101,12 @@ export async function POST(request: NextRequest) {
     // Draw gray dots for all check positions
     outputCtx.fillStyle = 'rgb(180, 180, 180)';
     for (let ci = 0; ci < NUM_COLS; ci++) {
+      const colStartY = startY + (colOffsets[ci] || 0);
+      const colEndY = endY + (colOffsets[ci] || 0);
       for (let row = 0; row < QUESTIONS_PER_COL; row++) {
         for (let opt = 0; opt < 4; opt++) {
           const absX = rect.x + cols[ci] + opt * optGap;
-          const absY = rect.y + getRowY(startY, endY, row, QUESTIONS_PER_COL);
+          const absY = rect.y + getRowY(colStartY, colEndY, row, QUESTIONS_PER_COL);
           outputCtx.beginPath();
           outputCtx.arc(absX, absY, 2, 0, Math.PI * 2);
           outputCtx.fill();
@@ -114,12 +118,15 @@ export async function POST(request: NextRequest) {
     for (let ci = 0; ci < NUM_COLS; ci++) {
       for (let row = 0; row < QUESTIONS_PER_COL; row++) {
         const q = ci * QUESTIONS_PER_COL + row + 1;
+        const colStartY = startY + (colOffsets[ci] || 0);
+        const colEndY = endY + (colOffsets[ci] || 0);
+
         const ratios: number[] = [];
         const coords: { x: number; y: number }[] = [];
 
         for (let opt = 0; opt < 4; opt++) {
           const absX = rect.x + cols[ci] + opt * optGap;
-          const absY = rect.y + getRowY(startY, endY, row, QUESTIONS_PER_COL);
+          const absY = rect.y + getRowY(colStartY, colEndY, row, QUESTIONS_PER_COL);
 
           const ratio = getFillRatio(imageData, imgWidth, imgHeight, absX, absY, bubbleR);
           ratios.push(ratio);
@@ -145,8 +152,8 @@ export async function POST(request: NextRequest) {
         } else {
           answers[String(q)] = 'INVALID';
           stats.invalid++;
-          // Draw red circles
-          outputCtx.strokeStyle = 'rgb(0, 0, 255)';
+          // Draw red circles for invalid
+          outputCtx.strokeStyle = 'rgb(255, 50, 50)';
           outputCtx.lineWidth = 2;
           for (const idx of filled) {
             const coord = coords[idx];
