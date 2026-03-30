@@ -50,22 +50,31 @@ function getRowY(startY: number, endY: number, rowIndex: number, totalRows: numb
 }
 
 // Two-section interpolation (200Q mode)
+// Section A keeps exact 180Q positions (no shift). Section B shifts down by gap.
 function getRowY200Q(startY: number, endY: number, rowIndex: number, totalRows: number, gap: number, sectionARows: number): number {
   const sectionBRows = totalRows - sectionARows;
-  const availableRange = endY - startY - gap;
-  const rangeA = availableRange * (sectionARows / totalRows);
-  const sectionAMidY = startY + rangeA;
-  const sectionBStartY = sectionAMidY + gap;
-  const sectionBEndY = endY;
-  const rangeB = sectionBEndY - sectionBStartY;
+
+  if (gap <= 0) {
+    // No gap — identical to 180Q
+    if (totalRows <= 1) return startY;
+    return startY + (endY - startY) * (rowIndex / (totalRows - 1));
+  }
 
   if (rowIndex < sectionARows) {
-    if (sectionARows <= 1) return startY;
-    return startY + rangeA * (rowIndex / (sectionARows - 1));
+    // Section A: keep 180Q positions (completely unaffected by gap)
+    if (totalRows <= 1) return startY;
+    return startY + (endY - startY) * (rowIndex / (totalRows - 1));
   } else {
+    // Section B: natural 180Q start + gap shift, then rescale to reach endY
     const bIndex = rowIndex - sectionARows;
-    if (sectionBRows <= 1) return sectionBStartY;
-    return sectionBStartY + rangeB * (bIndex / (sectionBRows - 1));
+    // Where section B would start in 180Q
+    const bNaturalStart = startY + (endY - startY) * (sectionARows / (totalRows - 1));
+    // Shift start down by gap
+    const bStart = bNaturalStart + gap;
+    if (bStart >= endY) return endY; // gap too big, cap
+    if (sectionBRows <= 1) return bStart;
+    // Rescale so last B row still hits endY
+    return bStart + (endY - bStart) * (bIndex / (sectionBRows - 1));
   }
 }
 

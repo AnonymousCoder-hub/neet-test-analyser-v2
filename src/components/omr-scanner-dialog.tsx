@@ -41,7 +41,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
 
   // OMR Mode: 180Q or 200Q
   const [mode, setMode] = useState<'180Q' | '200Q'>('180Q')
-  const [sectionGap, setSectionGap] = useState(20) // extra pixels between section A and B
+  const [sectionGap, setSectionGap] = useState(0) // extra pixels between section A and B (start at 0)
   const [sectionARows, setSectionARows] = useState(35) // rows in section A (200Q only)
   const totalRows = mode === '200Q' ? 45 : 45 // always 45 usable rows
 
@@ -115,24 +115,26 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
   const getEffectiveEndY = (ci: number) => colEndYs[ci] >= 0 ? colEndYs[ci] : endY
 
   // Row Y calculation with 200Q two-section support
+  // Section A rows: keep exact 180Q positions (gap has NO effect on them)
+  // Section B rows: shift down by gap, rescale to still reach endY
   const getRowY = (rowIndex: number, ci?: number) => {
     const s = ci !== undefined ? getEffectiveStartY(ci) : startY
     const e = ci !== undefined ? getEffectiveEndY(ci) : endY
-    if (mode === '200Q') {
+    if (mode === '200Q' && sectionGap > 0) {
       const sRows = sectionARows
       const bRows = totalRows - sRows
-      const availRange = e - s - sectionGap
-      const rangeA = availRange * (sRows / totalRows)
-      const sectionAMidY = s + rangeA
-      const sectionBStartY = sectionAMidY + sectionGap
       if (rowIndex < sRows) {
-        if (sRows <= 1) return s
-        return s + rangeA * (rowIndex / (sRows - 1))
+        // Section A: completely unaffected by gap
+        if (totalRows <= 1) return s
+        return s + (e - s) * (rowIndex / (totalRows - 1))
       } else {
+        // Section B: 180Q start position + gap, then rescale to endY
         const bIndex = rowIndex - sRows
-        const rangeB = e - sectionBStartY
-        if (bRows <= 1) return sectionBStartY
-        return sectionBStartY + rangeB * (bIndex / (bRows - 1))
+        const bNaturalStart = s + (e - s) * (sRows / (totalRows - 1))
+        const bStart = bNaturalStart + sectionGap
+        if (bStart >= e) return e
+        if (bRows <= 1) return bStart
+        return bStart + (e - bStart) * (bIndex / (bRows - 1))
       }
     }
     return s + (e - s) * (rowIndex / (totalRows - 1))
@@ -178,7 +180,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
         setCol1StartY(-1); setCol2StartY(-1); setCol3StartY(-1); setCol4StartY(-1)
         setCol1EndY(-1); setCol2EndY(-1); setCol3EndY(-1); setCol4EndY(-1)
         setFillThreshold(20); setMinDifference(15)
-        setSectionGap(20); setSectionARows(35)
+        setSectionGap(0); setSectionARows(35)
       }
       img.src = e.target!.result as string
       setImage(e.target!.result as string); setFile(f)
@@ -217,7 +219,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     setCol3EndY(s.col3EndY ?? -1); setCol4EndY(s.col4EndY ?? -1)
     setFillThreshold(s.fillThreshold ?? 20); setMinDifference(s.minDifference ?? 15)
     setMode((s.mode as '180Q' | '200Q') ?? '180Q')
-    setSectionGap(s.sectionGap ?? 20); setSectionARows(s.sectionARows ?? 35)
+    setSectionGap(s.sectionGap ?? 0); setSectionARows(s.sectionARows ?? 35)
     setShowPresetPanel(false)
   }
 
