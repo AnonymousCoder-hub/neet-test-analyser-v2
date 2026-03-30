@@ -8,7 +8,9 @@ interface Settings {
   startY: number;
   endY: number;
   bubbleR: number;
-  colYOffsets?: number[]; // per-column Y offset adjustments
+  colYOffsets?: number[];
+  fillThreshold?: number;   // minimum darkness to consider a bubble as potentially filled
+  minDifference?: number;   // minimum gap between darkest and 2nd darkest bubble
 }
 
 // Get darkness ratio of a circular region (0=white, 1=black)
@@ -27,21 +29,16 @@ function getFillRatio(imageData: ImageData, imgWidth: number, imgHeight: number,
   // Sample pixels in a circular region
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
-      // Check if point is inside circle
       if (dx * dx + dy * dy <= radius * radius) {
         const px = clampedX + dx;
         const py = clampedY + dy;
 
-        // Bounds check
         if (px >= 0 && px < imgWidth && py >= 0 && py < imgHeight) {
           const idx = (py * imgWidth + px) * 4;
-          // Get grayscale value from RGBA
           const red = imageData.data[idx];
           const green = imageData.data[idx + 1];
           const blue = imageData.data[idx + 2];
-          // Convert to grayscale using luminosity method
           const gray = 0.299 * red + 0.587 * green + 0.114 * blue;
-          // Darkness = 1 - brightness/255
           totalDarkness += (255 - gray) / 255;
           totalPixels++;
         }
@@ -69,8 +66,12 @@ export async function POST(request: NextRequest) {
     }
 
     const settings: Settings = JSON.parse(settingsStr);
-    const { rect, cols, optGap, startY, endY, bubbleR, colYOffsets } = settings;
-    const colOffsets = colYOffsets || cols.map(() => 0); // default to 0 if not provided
+    const { rect, cols, optGap, startY, endY, bubbleR, colYOffsets, fillThreshold, minDifference } = settings;
+    const colOffsets = colYOffsets || cols.map(() => 0);
+
+    // Tuning parameters (defaults)
+    const MIN_FILL = fillThreshold ?? 0.15;    // minimum darkness to even consider a bubble
+    const MIN_DIFF = minDifference ?? 0.08;    // filled bubble must be this much darker than 2nd darkest
 
     // Load image
     const arrayBuffer = await file.arrayBuffer();
@@ -93,7 +94,6 @@ export async function POST(request: NextRequest) {
 
     const QUESTIONS_PER_COL = 45;
     const NUM_COLS = cols.length;
-    const FILL_THRESHOLD = 0.30;
 
     const answers: Record<string, string | null> = {};
     const stats = { answered: 0, unanswered: 0, invalid: 0 };
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Process each column and row
+    // Process each column and row using RELATIVE comparison
     for (let ci = 0; ci < NUM_COLS; ci++) {
       for (let row = 0; row < QUESTIONS_PER_COL; row++) {
         const q = ci * QUESTIONS_PER_COL + row + 1;
@@ -133,34 +133,43 @@ export async function POST(request: NextRequest) {
           coords.push({ x: Math.round(absX), y: Math.round(absY) });
         }
 
-        // Find filled bubbles
-        const filled = ratios.map((r, i) => r > FILL_THRESHOLD ? i : -1).filter(i => i >= 0);
+        // Sort ratios descending but keep track of original indices
+        const sorted = ratios
+          .map((r, i) => ({ ratio: r, index: i }))
+          .sort((a, b) => b.ratio - a.ratio);
 
-        if (filled.length === 0) {
+        const maxRatio = sorted[0].ratio;
+        const maxIndex = sorted[0].index;
+        const secondMax = sorted[1].ratio;
+        const gap = maxRatio - secondMax;
+
+        if (maxRatio < MIN_FILL) {
+          // All bubbles are basically empty — no mark detected
           answers[String(q)] = null;
           stats.unanswered++;
-        } else if (filled.length === 1) {
-          answers[String(q)] = String(filled[0] + 1);
+        } else if (gap >= MIN_DIFF) {
+          // Clear winner — one bubble is significantly darker than the rest
+          answers[String(q)] = String(maxIndex + 1);
           stats.answered++;
-          // Draw green circle
-          const coord = coords[filled[0]];
           outputCtx.strokeStyle = 'rgb(0, 255, 0)';
           outputCtx.lineWidth = 2;
           outputCtx.beginPath();
-          outputCtx.arc(coord.x, coord.y, bubbleR + 3, 0, Math.PI * 2);
+          outputCtx.arc(coords[maxIndex].x, coords[maxIndex].y, bubbleR + 3, 0, Math.PI * 2);
+          outputCtx.stroke();
+        } else if (gap >= MIN_DIFF * 0.3 && maxRatio > MIN_FILL * 1.5) {
+          // Marginal case — one bubble is slightly darker, might be a light mark
+          // Still count it but with amber color to indicate low confidence
+          answers[String(q)] = String(maxIndex + 1);
+          stats.answered++;
+          outputCtx.strokeStyle = 'rgb(255, 180, 0)';
+          outputCtx.lineWidth = 2;
+          outputCtx.beginPath();
+          outputCtx.arc(coords[maxIndex].x, coords[maxIndex].y, bubbleR + 3, 0, Math.PI * 2);
           outputCtx.stroke();
         } else {
-          answers[String(q)] = 'INVALID';
-          stats.invalid++;
-          // Draw red circles for invalid
-          outputCtx.strokeStyle = 'rgb(255, 50, 50)';
-          outputCtx.lineWidth = 2;
-          for (const idx of filled) {
-            const coord = coords[idx];
-            outputCtx.beginPath();
-            outputCtx.arc(coord.x, coord.y, bubbleR + 3, 0, Math.PI * 2);
-            outputCtx.stroke();
-          }
+          // Can't distinguish — multiple bubbles similar darkness or all empty
+          answers[String(q)] = null;
+          stats.unanswered++;
         }
       }
     }
@@ -203,7 +212,7 @@ export async function POST(request: NextRequest) {
       },
       annotatedImage: `data:image/jpeg;base64,${annotatedImage}`,
       processor: 'javascript',
-      processorInfo: 'Pure JavaScript using canvas package - Vercel compatible'
+      processorInfo: 'Relative bubble comparison algorithm - robust for B&W and color images'
     });
 
   } catch (error) {

@@ -31,6 +31,8 @@ interface Preset {
     col2Y: number
     col3Y: number
     col4Y: number
+    fillThreshold: number
+    minDifference: number
   }
 }
 
@@ -73,6 +75,10 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
 
   // Global Y offset (shifts ALL columns together)
   const [globalYOffset, setGlobalYOffset] = useState(0)
+
+  // Detection tuning
+  const [fillThreshold, setFillThreshold] = useState(15) // x100 = 0.15
+  const [minDifference, setMinDifference] = useState(8)   // x100 = 0.08
 
   // Presets
   const [presets, setPresets] = useState<Preset[]>([])
@@ -140,12 +146,14 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
         setEndY(Math.round(h * 0.52))
         setBubbleR(Math.round(Math.min(w, h) * 0.006))
 
-        // Reset Y offsets
+        // Reset Y offsets and tuning
         setGlobalYOffset(0)
         setCol1Y(0)
         setCol2Y(0)
         setCol3Y(0)
         setCol4Y(0)
+        setFillThreshold(15)
+        setMinDifference(8)
       }
       img.src = e.target!.result as string
       setImage(e.target!.result as string)
@@ -182,7 +190,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
         rectX, rectY, rectW, rectH,
         col1, col2, col3, col4,
         optGap, startY, endY, bubbleR,
-        globalYOffset, col1Y, col2Y, col3Y, col4Y
+        globalYOffset, col1Y, col2Y, col3Y, col4Y,
+        fillThreshold, minDifference
       }
     }
 
@@ -211,6 +220,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     setCol2Y(s.col2Y ?? 0)
     setCol3Y(s.col3Y ?? 0)
     setCol4Y(s.col4Y ?? 0)
+    setFillThreshold(s.fillThreshold ?? 15)
+    setMinDifference(s.minDifference ?? 8)
     setShowPresetPanel(false)
   }
 
@@ -265,7 +276,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
         rectX, rectY, rectW, rectH,
         col1, col2, col3, col4,
         optGap, startY, endY, bubbleR,
-        globalYOffset, col1Y, col2Y, col3Y, col4Y
+        globalYOffset, col1Y, col2Y, col3Y, col4Y,
+        fillThreshold, minDifference
       }
     }
     exportPreset(preset)
@@ -297,7 +309,9 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
         getEffectiveOffset(1),
         getEffectiveOffset(2),
         getEffectiveOffset(3)
-      ]
+      ],
+      fillThreshold: fillThreshold / 100,
+      minDifference: minDifference / 100
     }
 
     try {
@@ -566,6 +580,30 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                       </div>
                     </div>
 
+                    {/* Detection Sensitivity */}
+                    <div className="bg-muted/50 rounded-lg p-2">
+                      <h3 className="text-xs font-semibold mb-1.5">Detection Sensitivity</h3>
+                      <p className="text-[9px] text-muted-foreground mb-2">Controls how the scanner decides which bubble is marked</p>
+                      <div className="space-y-1">
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">
+                            Fill Threshold
+                            <span className="font-mono">{fillThreshold}%</span>
+                          </label>
+                          <Slider value={[fillThreshold]} onValueChange={([v]) => setFillThreshold(v)} min={5} max={50} step={1} className="mt-1 h-4" />
+                          <p className="text-[8px] text-muted-foreground mt-0.5">Min darkness to consider a bubble as filled</p>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-muted-foreground flex justify-between">
+                            Min Difference
+                            <span className="font-mono">{minDifference}%</span>
+                          </label>
+                          <Slider value={[minDifference]} onValueChange={([v]) => setMinDifference(v)} min={2} max={40} step={1} className="mt-1 h-4" />
+                          <p className="text-[8px] text-muted-foreground mt-0.5">Filled bubble must be this much darker than others</p>
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Bubble Settings */}
                     <div className="bg-muted/50 rounded-lg p-2">
                       <h3 className="text-xs font-semibold mb-1.5">Bubble Settings</h3>
@@ -598,13 +636,13 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                           <div className="grid grid-cols-4 gap-1 text-center text-[10px]">
                             <div className="bg-green-500/20 rounded p-1"><p className="font-bold text-green-700">{result.data.statistics.answered}</p><p>Answered</p></div>
                             <div className="bg-amber-500/20 rounded p-1"><p className="font-bold text-amber-700">{result.data.statistics.unanswered}</p><p>Empty</p></div>
-                            <div className="bg-red-500/20 rounded p-1"><p className="font-bold text-red-700">{result.data.statistics.invalid}</p><p>Invalid</p></div>
+                            <div className="bg-red-500/20 rounded p-1"><p className="font-bold text-red-700">{result.data.statistics.invalid}</p><p>Skipped</p></div>
                             <div className="bg-muted rounded p-1"><p className="font-bold">{result.data.statistics.total_questions}</p><p>Total</p></div>
                           </div>
                         </div>
 
                         <div className="rounded-lg overflow-hidden border">
-                          <p className="text-[10px] text-muted-foreground p-1 bg-muted">Gray = positions | Green = detected | Red = invalid</p>
+                          <p className="text-[10px] text-muted-foreground p-1 bg-muted">Gray = positions | Green = confident | Amber = low confidence | Unmarked = skipped</p>
                           <img src={result.annotatedImage} alt="Result" className="w-full max-h-40 object-contain"/>
                         </div>
                       </>
