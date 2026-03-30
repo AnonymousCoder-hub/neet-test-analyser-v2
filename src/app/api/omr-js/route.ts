@@ -8,9 +8,10 @@ interface Settings {
   startY: number;
   endY: number;
   bubbleR: number;
-  colYOffsets?: number[];
-  fillThreshold?: number;   // minimum darkness to consider a bubble as potentially filled
-  minDifference?: number;   // minimum gap between darkest and 2nd darkest bubble
+  colStartYs?: number[];   // per-column start Y
+  colEndYs?: number[];     // per-column end Y
+  fillThreshold?: number;
+  minDifference?: number;
 }
 
 // Get darkness ratio of a circular region (0=white, 1=black)
@@ -19,14 +20,12 @@ function getFillRatio(imageData: ImageData, imgWidth: number, imgHeight: number,
   const centerY = Math.round(y);
   const radius = Math.max(1, Math.round(r));
 
-  // Clamp to image bounds
   const clampedX = Math.max(radius, Math.min(imgWidth - radius - 1, centerX));
   const clampedY = Math.max(radius, Math.min(imgHeight - radius - 1, centerY));
 
   let totalPixels = 0;
   let totalDarkness = 0;
 
-  // Sample pixels in a circular region
   for (let dy = -radius; dy <= radius; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
       if (dx * dx + dy * dy <= radius * radius) {
@@ -50,7 +49,6 @@ function getFillRatio(imageData: ImageData, imgWidth: number, imgHeight: number,
   return totalDarkness / totalPixels;
 }
 
-// Get Y position with interpolation
 function getRowY(startY: number, endY: number, rowIndex: number, totalRows: number): number {
   return startY + (endY - startY) * (rowIndex / (totalRows - 1));
 }
@@ -66,14 +64,16 @@ export async function POST(request: NextRequest) {
     }
 
     const settings: Settings = JSON.parse(settingsStr);
-    const { rect, cols, optGap, startY, endY, bubbleR, colYOffsets, fillThreshold, minDifference } = settings;
-    const colOffsets = colYOffsets || cols.map(() => 0);
+    const { rect, cols, optGap, startY, endY, bubbleR, colStartYs, colEndYs, fillThreshold, minDifference } = settings;
 
-    // Tuning parameters (defaults)
-    const MIN_FILL = fillThreshold ?? 0.15;    // minimum darkness to even consider a bubble
-    const MIN_DIFF = minDifference ?? 0.08;    // filled bubble must be this much darker than 2nd darkest
+    // Tuning defaults
+    const MIN_FILL = fillThreshold ?? 0.20;
+    const MIN_DIFF = minDifference ?? 0.15;
 
-    // Load image
+    // Per-column Y bounds: use per-column if provided, else fall back to global
+    const getColStartY = (ci: number) => colStartYs?.[ci] ?? startY;
+    const getColEndY = (ci: number) => colEndYs?.[ci] ?? endY;
+
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const img = await loadImage(buffer);
@@ -81,13 +81,11 @@ export async function POST(request: NextRequest) {
     const imgWidth = img.width;
     const imgHeight = img.height;
 
-    // Create canvas and get image data
     const canvas = createCanvas(imgWidth, imgHeight);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
     const imageData = ctx.getImageData(0, 0, imgWidth, imgHeight);
 
-    // Create output canvas for annotation
     const outputCanvas = createCanvas(imgWidth, imgHeight);
     const outputCtx = outputCanvas.getContext('2d');
     outputCtx.drawImage(img, 0, 0);
@@ -101,12 +99,12 @@ export async function POST(request: NextRequest) {
     // Draw gray dots for all check positions
     outputCtx.fillStyle = 'rgb(180, 180, 180)';
     for (let ci = 0; ci < NUM_COLS; ci++) {
-      const colStartY = startY + (colOffsets[ci] || 0);
-      const colEndY = endY + (colOffsets[ci] || 0);
+      const csy = getColStartY(ci);
+      const cey = getColEndY(ci);
       for (let row = 0; row < QUESTIONS_PER_COL; row++) {
         for (let opt = 0; opt < 4; opt++) {
           const absX = rect.x + cols[ci] + opt * optGap;
-          const absY = rect.y + getRowY(colStartY, colEndY, row, QUESTIONS_PER_COL);
+          const absY = rect.y + getRowY(csy, cey, row, QUESTIONS_PER_COL);
           outputCtx.beginPath();
           outputCtx.arc(absX, absY, 2, 0, Math.PI * 2);
           outputCtx.fill();
@@ -114,41 +112,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Process each column and row using RELATIVE comparison
+    // Process each question using ROBUST relative comparison
     for (let ci = 0; ci < NUM_COLS; ci++) {
+      const csy = getColStartY(ci);
+      const cey = getColEndY(ci);
+
       for (let row = 0; row < QUESTIONS_PER_COL; row++) {
         const q = ci * QUESTIONS_PER_COL + row + 1;
-        const colStartY = startY + (colOffsets[ci] || 0);
-        const colEndY = endY + (colOffsets[ci] || 0);
 
         const ratios: number[] = [];
         const coords: { x: number; y: number }[] = [];
 
         for (let opt = 0; opt < 4; opt++) {
           const absX = rect.x + cols[ci] + opt * optGap;
-          const absY = rect.y + getRowY(colStartY, colEndY, row, QUESTIONS_PER_COL);
+          const absY = rect.y + getRowY(csy, cey, row, QUESTIONS_PER_COL);
 
           const ratio = getFillRatio(imageData, imgWidth, imgHeight, absX, absY, bubbleR);
           ratios.push(ratio);
           coords.push({ x: Math.round(absX), y: Math.round(absY) });
         }
 
-        // Sort ratios descending but keep track of original indices
+        // Sort descending
         const sorted = ratios
           .map((r, i) => ({ ratio: r, index: i }))
           .sort((a, b) => b.ratio - a.ratio);
 
         const maxRatio = sorted[0].ratio;
         const maxIndex = sorted[0].index;
-        const secondMax = sorted[1].ratio;
-        const gap = maxRatio - secondMax;
+
+        // The "empty baseline" = average of the 3 lightest bubbles
+        const baseline = (sorted[1].ratio + sorted[2].ratio + sorted[3].ratio) / 3;
+        const gap = maxRatio - baseline;
 
         if (maxRatio < MIN_FILL) {
-          // All bubbles are basically empty — no mark detected
+          // Darkest bubble isn't dark enough — all empty
           answers[String(q)] = null;
           stats.unanswered++;
         } else if (gap >= MIN_DIFF) {
-          // Clear winner — one bubble is significantly darker than the rest
+          // Clear winner — significantly darker than the empty baseline
           answers[String(q)] = String(maxIndex + 1);
           stats.answered++;
           outputCtx.strokeStyle = 'rgb(0, 255, 0)';
@@ -156,9 +157,8 @@ export async function POST(request: NextRequest) {
           outputCtx.beginPath();
           outputCtx.arc(coords[maxIndex].x, coords[maxIndex].y, bubbleR + 3, 0, Math.PI * 2);
           outputCtx.stroke();
-        } else if (gap >= MIN_DIFF * 0.3 && maxRatio > MIN_FILL * 1.5) {
-          // Marginal case — one bubble is slightly darker, might be a light mark
-          // Still count it but with amber color to indicate low confidence
+        } else if (gap >= MIN_DIFF * 0.4 && maxRatio > MIN_FILL * 1.8) {
+          // Marginal — barely darker but very dark absolute, count with low confidence
           answers[String(q)] = String(maxIndex + 1);
           stats.answered++;
           outputCtx.strokeStyle = 'rgb(255, 180, 0)';
@@ -167,7 +167,7 @@ export async function POST(request: NextRequest) {
           outputCtx.arc(coords[maxIndex].x, coords[maxIndex].y, bubbleR + 3, 0, Math.PI * 2);
           outputCtx.stroke();
         } else {
-          // Can't distinguish — multiple bubbles similar darkness or all empty
+          // Can't distinguish — all roughly equal or too noisy
           answers[String(q)] = null;
           stats.unanswered++;
         }
@@ -182,26 +182,29 @@ export async function POST(request: NextRequest) {
     // Draw column lines
     outputCtx.strokeStyle = 'rgb(200, 200, 0)';
     outputCtx.lineWidth = 1;
-    for (const colX of cols) {
-      const x = rect.x + colX;
+    for (let ci = 0; ci < NUM_COLS; ci++) {
+      const x = rect.x + cols[ci];
       outputCtx.beginPath();
       outputCtx.moveTo(x, rect.y);
       outputCtx.lineTo(x, rect.y + rect.h);
       outputCtx.stroke();
     }
 
-    // Draw start/end Y markers
-    outputCtx.fillStyle = 'rgb(0, 200, 0)';
-    outputCtx.beginPath();
-    outputCtx.arc(rect.x - 10, rect.y + startY, 5, 0, Math.PI * 2);
-    outputCtx.fill();
+    // Draw per-column start/end markers
+    for (let ci = 0; ci < NUM_COLS; ci++) {
+      const csy = getColStartY(ci);
+      const cey = getColEndY(ci);
+      const x = rect.x + cols[ci];
+      outputCtx.fillStyle = 'rgb(0, 200, 0)';
+      outputCtx.beginPath();
+      outputCtx.arc(x, rect.y + csy, 4, 0, Math.PI * 2);
+      outputCtx.fill();
+      outputCtx.fillStyle = 'rgb(0, 0, 200)';
+      outputCtx.beginPath();
+      outputCtx.arc(x, rect.y + cey, 4, 0, Math.PI * 2);
+      outputCtx.fill();
+    }
 
-    outputCtx.fillStyle = 'rgb(0, 0, 200)';
-    outputCtx.beginPath();
-    outputCtx.arc(rect.x - 10, rect.y + endY, 5, 0, Math.PI * 2);
-    outputCtx.fill();
-
-    // Convert to base64
     const annotatedImage = outputCanvas.toBuffer('image/jpeg').toString('base64');
 
     return NextResponse.json({
@@ -212,7 +215,7 @@ export async function POST(request: NextRequest) {
       },
       annotatedImage: `data:image/jpeg;base64,${annotatedImage}`,
       processor: 'javascript',
-      processorInfo: 'Relative bubble comparison algorithm - robust for B&W and color images'
+      processorInfo: 'Robust relative comparison: darkest vs average of other 3'
     });
 
   } catch (error) {
