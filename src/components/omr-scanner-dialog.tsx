@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
@@ -62,7 +62,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
   const [col3, setCol3] = useState(170)
   const [col4, setCol4] = useState(245)
 
-  // 180Q row calibration (used as fallback for 200Q too)
+  // 180Q row calibration (also used as fallback for 200Q)
   const [startY, setStartY] = useState(15)
   const [endY, setEndY] = useState(700)
 
@@ -127,7 +127,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
 
   // Sections
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    mode: true, rect: true, cols: true, yoffsets: false, rowSpacing: false, secA: false, secB: false, sensitivity: false, bubble: true
+    mode: true, rect: true, cols: true, yoffsets: false, rowSpacing: false, secA: true, secB: true, sensitivity: false, bubble: true
   })
 
   const imgRef = useRef<HTMLImageElement>(null)
@@ -147,16 +147,50 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
 
   const getEffectiveOffset = (ci: number) => globalYOffset + colYOffsets[ci]
 
-  // Row Y: 180Q uses colStartYs/colEndYs, 200Q uses separate section A/B arrays
+  // Auto-calculate 200Q section defaults based on current startY/endY
+  const autoSet200QDefaults = useCallback(() => {
+    const range = endY - startY
+    const aEnd = Math.round(startY + range * 0.72)
+    const bStart = Math.round(startY + range * 0.78)
+    setSecAGlobalStartY(startY)
+    setSecAGlobalEndY(aEnd)
+    setSecBGlobalStartY(bStart)
+    setSecBGlobalEndY(endY)
+    // Reset per-column overrides
+    setSecACol1StartY(-1); setSecACol2StartY(-1); setSecACol3StartY(-1); setSecACol4StartY(-1)
+    setSecACol1EndY(-1); setSecACol2EndY(-1); setSecACol3EndY(-1); setSecACol4EndY(-1)
+    setSecBCol1StartY(-1); setSecBCol2StartY(-1); setSecBCol3StartY(-1); setSecBCol4StartY(-1)
+    setSecBCol1EndY(-1); setSecBCol2EndY(-1); setSecBCol3EndY(-1); setSecBCol4EndY(-1)
+  }, [startY, endY])
+
+  // Handle mode change
+  const handleModeChange = useCallback((newMode: '180Q' | '200Q') => {
+    setMode(newMode)
+    if (newMode === '200Q') {
+      autoSet200QDefaults()
+      setExpandedSections(p => ({ ...p, secA: true, secB: true }))
+    } else {
+      // Reset 200Q values when switching back to 180Q
+      setSecAGlobalStartY(-1); setSecAGlobalEndY(-1)
+      setSecBGlobalStartY(-1); setSecBGlobalEndY(-1)
+      setSecACol1StartY(-1); setSecACol2StartY(-1); setSecACol3StartY(-1); setSecACol4StartY(-1)
+      setSecACol1EndY(-1); setSecACol2EndY(-1); setSecACol3EndY(-1); setSecACol4EndY(-1)
+      setSecBCol1StartY(-1); setSecBCol2StartY(-1); setSecBCol3StartY(-1); setSecBCol4StartY(-1)
+      setSecBCol1EndY(-1); setSecBCol2EndY(-1); setSecBCol3EndY(-1); setSecBCol4EndY(-1)
+    }
+  }, [autoSet200QDefaults])
+
+  // Row Y calculation: 180Q uses colStartYs/colEndYs, 200Q uses separate section A/B
   const getRowY = (rowIndex: number, ci?: number) => {
     if (mode !== '200Q') {
       const s = ci !== undefined ? (colStartYs[ci] >= 0 ? colStartYs[ci] : startY) : startY
       const e = ci !== undefined ? (colEndYs[ci] >= 0 ? colEndYs[ci] : endY) : endY
+      if (TOTAL_ROWS <= 1) return s
       return s + (e - s) * (rowIndex / (TOTAL_ROWS - 1))
     }
-    // 200Q
+    // 200Q mode
     if (rowIndex < sectionARows) {
-      // Section A
+      // Section A (Q1 to Q{sectionARows})
       const globalS = secAGlobalStartY >= 0 ? secAGlobalStartY : startY
       const globalE = secAGlobalEndY >= 0 ? secAGlobalEndY : endY
       const colS = ci !== undefined ? (secAColStartYs[ci] >= 0 ? secAColStartYs[ci] : globalS) : globalS
@@ -164,7 +198,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
       if (sectionARows <= 1) return colS
       return colS + (colE - colS) * (rowIndex / (sectionARows - 1))
     } else {
-      // Section B
+      // Section B (Q{sectionARows+1} to Q{TOTAL_ROWS})
       const bRow = rowIndex - sectionARows
       const bTotal = TOTAL_ROWS - sectionARows
       const globalS = secBGlobalStartY >= 0 ? secBGlobalStartY : startY
@@ -193,17 +227,29 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
         setRectW(Math.round(w * 0.35)); setRectH(Math.round(h * 0.55))
         const cw = Math.round(w * 0.35 / 4)
         setCol1(Math.round(cw * 0.2)); setCol2(Math.round(cw * 1.2)); setCol3(Math.round(cw * 2.2)); setCol4(Math.round(cw * 3.2))
-        setOptGap(Math.round(w * 0.01)); setStartY(Math.round(h * 0.01)); setEndY(Math.round(h * 0.52))
+        const sY = Math.round(h * 0.01)
+        const eY = Math.round(h * 0.52)
+        setOptGap(Math.round(w * 0.01)); setStartY(sY); setEndY(eY)
         setBubbleR(Math.round(Math.min(w, h) * 0.006))
         setGlobalYOffset(0); setCol1Y(0); setCol2Y(0); setCol3Y(0); setCol4Y(0)
         setCol1StartY(-1); setCol2StartY(-1); setCol3StartY(-1); setCol4StartY(-1)
         setCol1EndY(-1); setCol2EndY(-1); setCol3EndY(-1); setCol4EndY(-1)
         setFillThreshold(20); setMinDifference(15); setSectionARows(35)
-        setSecAGlobalStartY(-1); setSecAGlobalEndY(-1); setSecBGlobalStartY(-1); setSecBGlobalEndY(-1)
+        // Reset 200Q values
+        setSecAGlobalStartY(-1); setSecAGlobalEndY(-1)
+        setSecBGlobalStartY(-1); setSecBGlobalEndY(-1)
         setSecACol1StartY(-1); setSecACol2StartY(-1); setSecACol3StartY(-1); setSecACol4StartY(-1)
         setSecACol1EndY(-1); setSecACol2EndY(-1); setSecACol3EndY(-1); setSecACol4EndY(-1)
         setSecBCol1StartY(-1); setSecBCol2StartY(-1); setSecBCol3StartY(-1); setSecBCol4StartY(-1)
         setSecBCol1EndY(-1); setSecBCol2EndY(-1); setSecBCol3EndY(-1); setSecBCol4EndY(-1)
+        // If in 200Q mode, auto-set defaults
+        if (mode === '200Q') {
+          const range = eY - sY
+          setSecAGlobalStartY(sY)
+          setSecAGlobalEndY(Math.round(sY + range * 0.72))
+          setSecBGlobalStartY(Math.round(sY + range * 0.78))
+          setSecBGlobalEndY(eY)
+        }
       }
       img.src = e.target!.result as string; setImage(e.target!.result as string); setFile(f)
     }
@@ -238,7 +284,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     setCol1StartY(s.col1StartY ?? -1); setCol2StartY(s.col2StartY ?? -1); setCol3StartY(s.col3StartY ?? -1); setCol4StartY(s.col4StartY ?? -1)
     setCol1EndY(s.col1EndY ?? -1); setCol2EndY(s.col2EndY ?? -1); setCol3EndY(s.col3EndY ?? -1); setCol4EndY(s.col4EndY ?? -1)
     setFillThreshold(s.fillThreshold ?? 20); setMinDifference(s.minDifference ?? 15)
-    setMode(s.mode ?? '180Q'); setSectionARows(s.sectionARows ?? 35)
+    const newMode = s.mode ?? '180Q'
+    setMode(newMode); setSectionARows(s.sectionARows ?? 35)
     setSecAGlobalStartY(s.secAGlobalStartY ?? -1); setSecAGlobalEndY(s.secAGlobalEndY ?? -1)
     setSecBGlobalStartY(s.secBGlobalStartY ?? -1); setSecBGlobalEndY(s.secBGlobalEndY ?? -1)
     setSecACol1StartY(s.secACol1StartY ?? -1); setSecACol2StartY(s.secACol2StartY ?? -1)
@@ -249,6 +296,9 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     setSecBCol3StartY(s.secBCol3StartY ?? -1); setSecBCol4StartY(s.secBCol4StartY ?? -1)
     setSecBCol1EndY(s.secBCol1EndY ?? -1); setSecBCol2EndY(s.secBCol2EndY ?? -1)
     setSecBCol3EndY(s.secBCol3EndY ?? -1); setSecBCol4EndY(s.secBCol4EndY ?? -1)
+    if (newMode === '200Q') {
+      setExpandedSections(p => ({ ...p, secA: true, secB: true }))
+    }
     setShowPresetPanel(false)
   }
 
@@ -271,13 +321,18 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     reader.readAsText(f); e.target.value = ''
   }
 
+  // Resolve a Y value: if < 0, use fallback
+  const resolveY = (val: number, fallback: number) => val >= 0 ? val : fallback
+
   const scan = async () => {
     if (!file) return; setProcessing(true); setResult(null)
+    // Apply Y offsets to per-column Y values sent to backend
+    const offset = (ci: number) => getEffectiveOffset(ci)
     const settings: any = {
       rect: { x: rectX, y: rectY, w: rectW, h: rectH },
       cols: [col1, col2, col3, col4], optGap, startY, endY, bubbleR,
-      colStartYs: cols.map((_, ci) => colStartYs[ci] >= 0 ? colStartYs[ci] : startY),
-      colEndYs: cols.map((_, ci) => colEndYs[ci] >= 0 ? colEndYs[ci] : endY),
+      colStartYs: cols.map((_, ci) => (colStartYs[ci] >= 0 ? colStartYs[ci] : startY) + offset(ci)),
+      colEndYs: cols.map((_, ci) => (colEndYs[ci] >= 0 ? colEndYs[ci] : endY) + offset(ci)),
       fillThreshold: fillThreshold / 100, minDifference: minDifference / 100,
       mode, sectionARows
     }
@@ -286,10 +341,10 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
       const gAE = secAGlobalEndY >= 0 ? secAGlobalEndY : endY
       const gBS = secBGlobalStartY >= 0 ? secBGlobalStartY : startY
       const gBE = secBGlobalEndY >= 0 ? secBGlobalEndY : endY
-      settings.secAStartYs = secAColStartYs.map((v, ci) => v >= 0 ? v : gAS)
-      settings.secAEndYs = secAColEndYs.map((v, ci) => v >= 0 ? v : gAE)
-      settings.secBStartYs = secBColStartYs.map((v, ci) => v >= 0 ? v : gBS)
-      settings.secBEndYs = secBColEndYs.map((v, ci) => v >= 0 ? v : gBE)
+      settings.secAStartYs = secAColStartYs.map((v, ci) => (v >= 0 ? v : gAS) + offset(ci))
+      settings.secAEndYs = secAColEndYs.map((v, ci) => (v >= 0 ? v : gAE) + offset(ci))
+      settings.secBStartYs = secBColStartYs.map((v, ci) => (v >= 0 ? v : gBS) + offset(ci))
+      settings.secBEndYs = secBColEndYs.map((v, ci) => (v >= 0 ? v : gBE) + offset(ci))
     }
     try {
       const fd = new FormData(); fd.append('file', file); fd.append('settings', JSON.stringify(settings))
@@ -300,7 +355,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
   const confirmAndImport = () => {
     if (!result?.success || !result.data?.answers) return
     const a: string[] = []
-    for (let i = 1; i <= 180; i++) { const ans = result.data.answers[String(i)]; a.push(!ans || ans === 'INVALID' ? '0' : ans) }
+    const total = mode === '200Q' ? (NUM_COLS * TOTAL_ROWS) : 180
+    for (let i = 1; i <= total; i++) { const ans = result.data.answers[String(i)]; a.push(!ans || ans === 'INVALID' ? '0' : ans) }
     onAnswersDetected(a); onOpenChange(false)
   }
 
@@ -311,12 +367,18 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     setCol1EndY(-1); setCol2EndY(-1); setCol3EndY(-1); setCol4EndY(-1)
   }
   const resetSecA = () => {
-    setSecAGlobalStartY(-1); setSecAGlobalEndY(-1)
+    const range = (secAGlobalEndY >= 0 ? secAGlobalEndY : endY) - (secAGlobalStartY >= 0 ? secAGlobalStartY : startY)
+    // Reset to auto-calculated defaults
+    const aS = startY
+    const aE = Math.round(startY + (endY - startY) * 0.72)
+    setSecAGlobalStartY(aS); setSecAGlobalEndY(aE)
     setSecACol1StartY(-1); setSecACol2StartY(-1); setSecACol3StartY(-1); setSecACol4StartY(-1)
     setSecACol1EndY(-1); setSecACol2EndY(-1); setSecACol3EndY(-1); setSecACol4EndY(-1)
   }
   const resetSecB = () => {
-    setSecBGlobalStartY(-1); setSecBGlobalEndY(-1)
+    const bS = Math.round(startY + (endY - startY) * 0.78)
+    const bE = endY
+    setSecBGlobalStartY(bS); setSecBGlobalEndY(bE)
     setSecBCol1StartY(-1); setSecBCol2StartY(-1); setSecBCol3StartY(-1); setSecBCol4StartY(-1)
     setSecBCol1EndY(-1); setSecBCol2EndY(-1); setSecBCol3EndY(-1); setSecBCol4EndY(-1)
   }
@@ -328,47 +390,76 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
     </button>
   )
 
-  // Helper to render section row controls using individual setters
-  const SecControls = ({ label, resetFn, globalS, globalE, onGlobalS, onGlobalE, colVals, onColVal }: {
-    label: string; resetFn: () => void
+  // Y-value slider: value can be -1 (use global/default) or 0+ (absolute position)
+  // Slider range: 0 to max. When value is -1, display "USE GLB" and slider at 0.
+  const YSlider = ({ value, onChange, min = 0, max, label, labelColor }: {
+    value: number; onChange: (v: number) => void; min?: number; max: number
+    label: string; labelColor?: string
+  }) => {
+    const isDefault = value < 0
+    const displayVal = isDefault ? min : value
+    return (
+      <div>
+        <label className="text-[10px] text-muted-foreground flex justify-between">
+          {label}
+          <span className={`font-mono ${labelColor || ''}`}>{isDefault ? 'USE GLB' : value}</span>
+        </label>
+        <Slider
+          value={[displayVal]}
+          onValueChange={([v]) => onChange(v)}
+          min={min}
+          max={max}
+          step={1}
+          className="mt-1 h-3"
+        />
+      </div>
+    )
+  }
+
+  // Section controls for 200Q mode
+  const SectionYControls = ({ title, sectionKey, colorClass, borderClass, globalS, globalE, onGlobalS, onGlobalE, resetFn, colStartVals, colEndVals, onColStart, onColEnd, rowInfo }: {
+    title: string; sectionKey: string; colorClass: string; borderClass: string
     globalS: number; globalE: number
     onGlobalS: (v: number) => void; onGlobalE: (v: number) => void
-    colVals: number[]; // [col0S, col0E, col1S, col1E, col2S, col2E, col3S, col3E]
-    onColVal: (colIdx: number, isEnd: boolean, v: number) => void
+    resetFn: () => void
+    colStartVals: number[]; colEndVals: number[]
+    onColStart: (ci: number, v: number) => void
+    onColEnd: (ci: number, v: number) => void
+    rowInfo: string
   }) => (
-    <div className="space-y-1">
-      <p className="text-[9px] text-muted-foreground">{label}</p>
-      <div className="pb-1 border-b border-muted space-y-1">
-        <div>
-          <label className="text-[10px] text-muted-foreground flex justify-between">Global Start Y <span className="font-mono text-green-600">{globalS < 0 ? 'DEF' : globalS}</span></label>
-          <Slider value={[Math.max(0, globalS)]} onValueChange={([v]) => onGlobalS(v === 0 ? -1 : v)} min={0} max={rectH} step={1} className="mt-1 h-4" />
-        </div>
-        <div>
-          <label className="text-[10px] text-muted-foreground flex justify-between">Global End Y <span className="font-mono text-red-600">{globalE < 0 ? 'DEF' : globalE}</span></label>
-          <Slider value={[Math.max(0, globalE)]} onValueChange={([v]) => onGlobalE(v === 0 ? -1 : v)} min={0} max={rectH} step={1} className="mt-1 h-4" />
-        </div>
-      </div>
-      <button onClick={resetFn} className="text-[9px] text-muted-foreground hover:text-destructive underline">Reset All to Default</button>
-      <div className="space-y-1">
-        {[0, 1, 2, 3].map(ci => {
-          const cS = colVals[ci * 2], cE = colVals[ci * 2 + 1]
-          return (
-            <div key={ci} className="bg-background/50 rounded p-1.5 space-y-0.5">
-              <span className={`text-[10px] font-medium ${COL_COLORS[ci]}`}>C{ci + 1}</span>
-              <div className="flex items-center gap-1">
-                <span className="w-4 text-[8px] text-green-600">S</span>
-                <Slider value={[Math.max(0, cS)]} onValueChange={([v]) => onColVal(ci, false, v === 0 ? -1 : v)} min={0} max={rectH} step={1} className="flex-1 h-3" />
-                <span className="w-5 text-[8px] font-mono text-right">{cS < 0 ? 'GLB' : cS}</span>
+    <div className={`rounded-lg p-2 ${borderClass}`}>
+      <SectionHeader title={title} sectionKey={sectionKey} />
+      {expandedSections[sectionKey] && (
+        <div className="mt-1.5 space-y-2">
+          <p className="text-[9px] text-muted-foreground">{rowInfo}. Set -1 = use global (slide to 0).</p>
+          <div className="pb-2 border-b border-muted space-y-1">
+            <YSlider label="Global Start Y" value={globalS} onChange={onGlobalS} max={rectH} labelColor="text-green-600" />
+            <YSlider label="Global End Y" value={globalE} onChange={onGlobalE} max={rectH} labelColor="text-red-600" />
+          </div>
+          <button onClick={resetFn} className="text-[9px] text-muted-foreground hover:text-destructive underline">Auto-calculate Defaults</button>
+          <div className="space-y-1.5">
+            {[0, 1, 2, 3].map(ci => (
+              <div key={ci} className="bg-background/50 rounded p-1.5 space-y-0.5">
+                <span className={`text-[10px] font-medium ${COL_COLORS[ci]}`}>C{ci + 1}</span>
+                <YSlider
+                  label=""
+                  value={colStartVals[ci]}
+                  onChange={(v) => onColStart(ci, v)}
+                  max={rectH}
+                  labelColor="text-green-600"
+                />
+                <YSlider
+                  label=""
+                  value={colEndVals[ci]}
+                  onChange={(v) => onColEnd(ci, v)}
+                  max={rectH}
+                  labelColor="text-red-600"
+                />
               </div>
-              <div className="flex items-center gap-1">
-                <span className="w-4 text-[8px] text-red-600">E</span>
-                <Slider value={[Math.max(0, cE)]} onValueChange={([v]) => onColVal(ci, true, v === 0 ? -1 : v)} min={0} max={rectH} step={1} className="flex-1 h-3" />
-                <span className="w-5 text-[8px] font-mono text-right">{cE < 0 ? 'GLB' : cE}</span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 
@@ -410,19 +501,57 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                   <div className="absolute border-2 border-primary/80 bg-primary/5 pointer-events-none" style={{ left: rectX * scale, top: rectY * scale, width: rectW * scale, height: rectH * scale }}>
                     {cols.map((_, ci) => (
                       <div key={ci}>
-                        {Array.from({ length: TOTAL_ROWS }, (_, ri) =>
+                        {/* Section A bubbles (green tint) */}
+                        {mode === '200Q' && Array.from({ length: sectionARows }, (_, ri) =>
+                          Array.from({ length: OPTIONS }, (_, oi) => {
+                            const { absX, absY } = getBubblePos(ci, ri, oi)
+                            return <div key={`a-${ci}-${ri}-${oi}`} className="absolute rounded-full border border-emerald-400/70 bg-emerald-400/20" style={{ left: (absX - rectX) * scale, top: (absY - rectY) * scale, width: bubbleR * 2 * scale, height: bubbleR * 2 * scale, transform: 'translate(-50%, -50%)' }} />
+                          })
+                        )}
+                        {/* Section B bubbles (blue tint) */}
+                        {mode === '200Q' && Array.from({ length: TOTAL_ROWS - sectionARows }, (_, ri) => {
+                          const actualRi = ri + sectionARows
+                          return Array.from({ length: OPTIONS }, (_, oi) => {
+                            const { absX, absY } = getBubblePos(ci, actualRi, oi)
+                            return <div key={`b-${ci}-${actualRi}-${oi}`} className="absolute rounded-full border border-blue-400/70 bg-blue-400/20" style={{ left: (absX - rectX) * scale, top: (absY - rectY) * scale, width: bubbleR * 2 * scale, height: bubbleR * 2 * scale, transform: 'translate(-50%, -50%)' }} />
+                          })
+                        })}
+                        {/* 180Q bubbles (normal colors) */}
+                        {mode === '180Q' && Array.from({ length: TOTAL_ROWS }, (_, ri) =>
                           Array.from({ length: OPTIONS }, (_, oi) => {
                             const { absX, absY } = getBubblePos(ci, ri, oi)
                             return <div key={`${ci}-${ri}-${oi}`} className={`absolute rounded-full border ${COL_BG[ci]}`} style={{ left: (absX - rectX) * scale, top: (absY - rectY) * scale, width: bubbleR * 2 * scale, height: bubbleR * 2 * scale, transform: 'translate(-50%, -50%)' }} />
                           })
                         )}
+                        {/* Section divider line for 200Q */}
                         {mode === '200Q' && (
-                          <div className="absolute w-full border-t border-dashed border-red-500/60 pointer-events-none" style={{ top: ((getRowY(sectionARows - 1, ci) + getRowY(sectionARows, ci)) / 2 - rectY) * scale }} />
+                          <div className="absolute w-full border-t-2 border-dashed border-red-500/80 pointer-events-none" style={{ top: ((getRowY(sectionARows - 1, ci) + getRowY(sectionARows, ci)) / 2 - rectY) * scale }} />
                         )}
                       </div>
                     ))}
-                    <div className="absolute w-3 h-3 bg-green-500 rounded-full" style={{ left: -6, top: startY * scale, transform: 'translateY(-50%)' }} />
-                    <div className="absolute w-3 h-3 bg-red-500 rounded-full" style={{ left: -6, top: endY * scale, transform: 'translateY(-50%)' }} />
+                    {/* Section A start/end markers */}
+                    {mode === '200Q' && (() => {
+                      const aS = resolveY(secAGlobalStartY, startY)
+                      const aE = resolveY(secAGlobalEndY, endY)
+                      return (<>
+                        <div className="absolute w-3 h-3 bg-emerald-500 rounded-full" style={{ left: -6, top: aS * scale, transform: 'translateY(-50%)' }} />
+                        <div className="absolute w-3 h-3 bg-emerald-500 rounded-full" style={{ left: -6, top: aE * scale, transform: 'translateY(-50%)' }} />
+                      </>)
+                    })()}
+                    {/* Section B start/end markers */}
+                    {mode === '200Q' && (() => {
+                      const bS = resolveY(secBGlobalStartY, startY)
+                      const bE = resolveY(secBGlobalEndY, endY)
+                      return (<>
+                        <div className="absolute w-3 h-3 bg-blue-500 rounded-full" style={{ left: -12, top: bS * scale, transform: 'translateY(-50%)' }} />
+                        <div className="absolute w-3 h-3 bg-blue-500 rounded-full" style={{ left: -12, top: bE * scale, transform: 'translateY(-50%)' }} />
+                      </>)
+                    })()}
+                    {/* 180Q start/end markers */}
+                    {mode === '180Q' && (<>
+                      <div className="absolute w-3 h-3 bg-green-500 rounded-full" style={{ left: -6, top: startY * scale, transform: 'translateY(-50%)' }} />
+                      <div className="absolute w-3 h-3 bg-red-500 rounded-full" style={{ left: -6, top: endY * scale, transform: 'translateY(-50%)' }} />
+                    </>)}
                   </div>
                 )}
               </div>
@@ -462,7 +591,7 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                   <h3 className="text-xs font-semibold mb-1.5">OMR Mode</h3>
                   <div className="flex gap-2">
                     {(['180Q', '200Q'] as const).map(m => (
-                      <button key={m} onClick={() => setMode(m)} className={`flex-1 py-1.5 text-xs font-semibold rounded-md border transition-colors ${mode === m ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-muted hover:border-primary/50'}`}>{m}</button>
+                      <button key={m} onClick={() => handleModeChange(m)} className={`flex-1 py-1.5 text-xs font-semibold rounded-md border transition-colors ${mode === m ? 'bg-primary text-primary-foreground border-primary' : 'bg-background border-muted hover:border-primary/50'}`}>{m}</button>
                     ))}
                   </div>
                   {mode === '200Q' && (
@@ -488,8 +617,8 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                 <div className="bg-muted/50 rounded-lg p-2">
                   <SectionHeader title="Column X Positions" sectionKey="cols" />
                   {expandedSections.cols && <div className="space-y-1 mt-1.5">
-                    {[ [col1, setCol1, 0], [col2, setCol2, 1], [col3, setCol3, 2], [col4, setCol4, 3] ].map(([val, set, i]) => (
-                      <div key={i} className="flex items-center gap-2"><span className={`w-6 text-[10px] font-medium ${COL_COLORS[i]}`}>C{i + 1}</span><Slider value={[val as number]} onValueChange={([v]) => (set as React.Dispatch<React.SetStateAction<number>>)(v)} min={0} max={rectW} step={1} className="flex-1 h-4" /><span className="w-5 text-[10px] font-mono text-right">{val}</span></div>
+                    {([ [col1, setCol1, 0], [col2, setCol2, 1], [col3, setCol3, 2], [col4, setCol4, 3] ] as const).map(([val, set, i]) => (
+                      <div key={i} className="flex items-center gap-2"><span className={`w-6 text-[10px] font-medium ${COL_COLORS[i]}`}>C{i + 1}</span><Slider value={[val]} onValueChange={([v]) => set(v)} min={0} max={rectW} step={1} className="flex-1 h-4" /><span className="w-5 text-[10px] font-mono text-right">{val}</span></div>
                     ))}
                   </div>}
                 </div>
@@ -503,50 +632,64 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                       <label className="text-[10px] text-muted-foreground flex justify-between"><span className="font-medium text-foreground/70">Global Y Shift</span><span className="font-mono">{globalYOffset > 0 ? '+' : ''}{globalYOffset}</span></label>
                       <Slider value={[globalYOffset]} onValueChange={([v]) => setGlobalYOffset(v)} min={-200} max={200} step={1} className="mt-1 h-4" />
                     </div>
-                    {[ [col1Y, setCol1Y, 0], [col2Y, setCol2Y, 1], [col3Y, setCol3Y, 2], [col4Y, setCol4Y, 3] ].map(([val, set, i]) => (
-                      <div key={i} className="flex items-center gap-2"><span className={`w-6 text-[10px] font-medium ${COL_COLORS[i]}`}>C{i + 1}</span><Slider value={[val as number]} onValueChange={([v]) => (set as React.Dispatch<React.SetStateAction<number>>)(v)} min={-200} max={200} step={1} className="flex-1 h-4" /><span className={`w-8 text-[10px] font-mono text-right ${COL_COLORS[i]}`}>{(val as number) > 0 ? '+' : ''}{val}</span></div>
+                    {([ [col1Y, setCol1Y, 0], [col2Y, setCol2Y, 1], [col3Y, setCol3Y, 2], [col4Y, setCol4Y, 3] ] as const).map(([val, set, i]) => (
+                      <div key={i} className="flex items-center gap-2"><span className={`w-6 text-[10px] font-medium ${COL_COLORS[i]}`}>C{i + 1}</span><Slider value={[val]} onValueChange={([v]) => set(v)} min={-200} max={200} step={1} className="flex-1 h-4" /><span className={`w-8 text-[10px] font-mono text-right ${COL_COLORS[i]}`}>{val > 0 ? '+' : ''}{val}</span></div>
                     ))}
                   </div>}
                 </div>
 
                 {/* 200Q: Section A Controls */}
                 {mode === '200Q' && (
-                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2">
-                    <SectionHeader title={`Section A (Q1-${sectionARows})`} sectionKey="secA" />
-                    {expandedSections.secA && <SecControls
-                      label={`Section A: Q1-${sectionARows} — separate Start/End per column (-1 = use global)`}
-                      resetFn={resetSecA}
-                      globalS={secAGlobalStartY} globalE={secAGlobalEndY}
-                      onGlobalS={setSecAGlobalStartY} onGlobalE={setSecAGlobalEndY}
-                      colVals={[secACol1StartY, secACol1EndY, secACol2StartY, secACol2EndY, secACol3StartY, secACol3EndY, secACol4StartY, secACol4EndY]}
-                      onColVal={(ci, isEnd, v) => {
-                        if (ci === 0) isEnd ? setSecACol1EndY(v) : setSecACol1StartY(v)
-                        else if (ci === 1) isEnd ? setSecACol2EndY(v) : setSecACol2StartY(v)
-                        else if (ci === 2) isEnd ? setSecACol3EndY(v) : setSecACol3StartY(v)
-                        else isEnd ? setSecACol4EndY(v) : setSecACol4StartY(v)
-                      }}
-                    />}
-                  </div>
+                  <SectionYControls
+                    title={`Section A (Q1-${sectionARows})`}
+                    sectionKey="secA"
+                    colorClass="text-emerald-600"
+                    borderClass="bg-emerald-500/10 border border-emerald-500/20"
+                    globalS={secAGlobalStartY} globalE={secAGlobalEndY}
+                    onGlobalS={setSecAGlobalStartY} onGlobalE={setSecAGlobalEndY}
+                    resetFn={resetSecA}
+                    colStartVals={secAColStartYs} colEndVals={secAColEndYs}
+                    onColStart={(ci, v) => {
+                      if (ci === 0) setSecACol1StartY(v)
+                      else if (ci === 1) setSecACol2StartY(v)
+                      else if (ci === 2) setSecACol3StartY(v)
+                      else setSecACol4StartY(v)
+                    }}
+                    onColEnd={(ci, v) => {
+                      if (ci === 0) setSecACol1EndY(v)
+                      else if (ci === 1) setSecACol2EndY(v)
+                      else if (ci === 2) setSecACol3EndY(v)
+                      else setSecACol4EndY(v)
+                    }}
+                    rowInfo={`Q1 to Q${sectionARows} (${sectionARows} rows)`}
+                  />
                 )}
 
                 {/* 200Q: Section B Controls */}
                 {mode === '200Q' && (
-                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-2">
-                    <SectionHeader title={`Section B (Q${sectionARows + 1}-${TOTAL_ROWS})`} sectionKey="secB" />
-                    {expandedSections.secB && <SecControls
-                      label={`Section B: Q${sectionARows + 1}-${TOTAL_ROWS} — separate Start/End per column (-1 = use global)`}
-                      resetFn={resetSecB}
-                      globalS={secBGlobalStartY} globalE={secBGlobalEndY}
-                      onGlobalS={setSecBGlobalStartY} onGlobalE={setSecBGlobalEndY}
-                      colVals={[secBCol1StartY, secBCol1EndY, secBCol2StartY, secBCol2EndY, secBCol3StartY, secBCol3EndY, secBCol4StartY, secBCol4EndY]}
-                      onColVal={(ci, isEnd, v) => {
-                        if (ci === 0) isEnd ? setSecBCol1EndY(v) : setSecBCol1StartY(v)
-                        else if (ci === 1) isEnd ? setSecBCol2EndY(v) : setSecBCol2StartY(v)
-                        else if (ci === 2) isEnd ? setSecBCol3EndY(v) : setSecBCol3StartY(v)
-                        else isEnd ? setSecBCol4EndY(v) : setSecBCol4StartY(v)
-                      }}
-                    />}
-                  </div>
+                  <SectionYControls
+                    title={`Section B (Q${sectionARows + 1}-${TOTAL_ROWS})`}
+                    sectionKey="secB"
+                    colorClass="text-blue-600"
+                    borderClass="bg-blue-500/10 border border-blue-500/20"
+                    globalS={secBGlobalStartY} globalE={secBGlobalEndY}
+                    onGlobalS={setSecBGlobalStartY} onGlobalE={setSecBGlobalEndY}
+                    resetFn={resetSecB}
+                    colStartVals={secBColStartYs} colEndVals={secBColEndYs}
+                    onColStart={(ci, v) => {
+                      if (ci === 0) setSecBCol1StartY(v)
+                      else if (ci === 1) setSecBCol2StartY(v)
+                      else if (ci === 2) setSecBCol3StartY(v)
+                      else setSecBCol4StartY(v)
+                    }}
+                    onColEnd={(ci, v) => {
+                      if (ci === 0) setSecBCol1EndY(v)
+                      else if (ci === 1) setSecBCol2EndY(v)
+                      else if (ci === 2) setSecBCol3EndY(v)
+                      else setSecBCol4EndY(v)
+                    }}
+                    rowInfo={`Q${sectionARows + 1} to Q${TOTAL_ROWS} (${TOTAL_ROWS - sectionARows} rows)`}
+                  />
                 )}
 
                 {/* 180Q Row Spacing (hidden in 200Q mode) */}
@@ -560,11 +703,11 @@ export function OMRScannerDialog({ open, onOpenChange, onAnswersDetected }: OMRS
                           <div><label className="text-[10px] text-muted-foreground flex justify-between">Global Start Y <span className="font-mono text-green-600">{startY}</span></label><Slider value={[startY]} onValueChange={([v]) => setStartY(v)} min={0} max={rectH} step={1} className="mt-1 h-4" /></div>
                           <div><label className="text-[10px] text-muted-foreground flex justify-between">Global End Y <span className="font-mono text-red-600">{endY}</span></label><Slider value={[endY]} onValueChange={([v]) => setEndY(v)} min={0} max={rectH} step={1} className="mt-1 h-4" /></div>
                         </div>
-                        {[ [col1StartY, setCol1StartY, col1EndY, setCol1EndY, 0], [col2StartY, setCol2StartY, col2EndY, setCol2EndY, 1], [col3StartY, setCol3StartY, col3EndY, setCol3EndY, 2], [col4StartY, setCol4StartY, col4EndY, setCol4EndY, 3] ].map(([sy, setSy, ey, setEy, i]) => (
+                        {([ [col1StartY, setCol1StartY, col1EndY, setCol1EndY, 0], [col2StartY, setCol2StartY, col2EndY, setCol2EndY, 1], [col3StartY, setCol3StartY, col3EndY, setCol3EndY, 2], [col4StartY, setCol4StartY, col4EndY, setCol4EndY, 3] ] as const).map(([sy, setSy, ey, setEy, i]) => (
                           <div key={i} className="bg-background/50 rounded p-1.5 space-y-0.5">
                             <span className={`text-[10px] font-medium ${COL_COLORS[i]}`}>C{i + 1}</span>
-                            <div className="flex items-center gap-1"><span className="w-4 text-[8px] text-green-600">S</span><Slider value={[sy as number]} onValueChange={([v]) => (setSy as React.Dispatch<React.SetStateAction<number>>)(v)} min={-1} max={rectH} step={1} className="flex-1 h-3" /><span className="w-5 text-[8px] font-mono text-right">{(sy as number) < 0 ? 'GLB' : sy}</span></div>
-                            <div className="flex items-center gap-1"><span className="w-4 text-[8px] text-red-600">E</span><Slider value={[ey as number]} onValueChange={([v]) => (setEy as React.Dispatch<React.SetStateAction<number>>)(v)} min={-1} max={rectH} step={1} className="flex-1 h-3" /><span className="w-5 text-[8px] font-mono text-right">{(ey as number) < 0 ? 'GLB' : ey}</span></div>
+                            <div className="flex items-center gap-1"><span className="w-4 text-[8px] text-green-600">S</span><Slider value={[sy]} onValueChange={([v]) => setSy(v)} min={-1} max={rectH} step={1} className="flex-1 h-3" /><span className="w-5 text-[8px] font-mono text-right">{sy < 0 ? 'GLB' : sy}</span></div>
+                            <div className="flex items-center gap-1"><span className="w-4 text-[8px] text-red-600">E</span><Slider value={[ey]} onValueChange={([v]) => setEy(v)} min={-1} max={rectH} step={1} className="flex-1 h-3" /><span className="w-5 text-[8px] font-mono text-right">{ey < 0 ? 'GLB' : ey}</span></div>
                           </div>
                         ))}
                       </div>
